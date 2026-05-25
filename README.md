@@ -392,7 +392,7 @@ index=sysmon (EventCode=19 OR EventCode=20 OR EventCode=21)
 
 This query looks for the full WMI event subscription chain by correlating Sysmon Event IDs `19`, `20`, and `21` on the same host within a 5-minute window. It labels each event as a filter, consumer, or binding, then checks whether all three components were created close together. The query also reviews the consumer action to identify higher risk behaviour, such as WMI executing `powershell.exe`, `cmd.exe`, script hosts, LOLBins, or files from user writable paths for e.g in the home folder, not system32 :D. This makes the logic more useful than alerting on a single WMI event, as it looks for the complete persistence chain and adds basic severity context.
 
-**Key parts Broken down by AI:**
+**Key parts Broken down:**
 
 - `EventCode=19 OR EventCode=20 OR EventCode=21` searches for WMI filter, consumer, and binding creation events.
 - `case()` labels each event as `filter`, `consumer`, or `binding`.
