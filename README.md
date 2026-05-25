@@ -19,6 +19,18 @@ This technique can involve creating three WMI components:
 This hunt maps to MITRE ATT&CK `T1546.003` because WMI event subscriptions can be used to execute commands automatically when a defined WMI event condition is met.
 
 - https://attack.mitre.org/techniques/T1546/003/
+  
+
+## Background: Why WMI Matters to Defenders
+
+We've all heard of registry run keys, scheduled tasks and the start up folder items. Threat actors still use all of these today and that's because they still work. WMI is simply another area to focus on for persistence. 
+
+WMI is a built in Windows management technology used for system administration, monitoring, inventory, and remote management. Because it is native to Windows, it is commonly used by legitimate administrators and enterprise tools.
+
+Attackers can abuse WMI for discovery, remote execution, lateral movement, and persistence. WMI event subscription persistence is particularly important because it allows a command or script to run automatically when a defined trigger condition is met.
+
+This technique usually involves an event filter, an event consumer, and a filter-to-consumer binding. Defenders should look for these components being created close together and review what action the consumer is configured to execute.
+
 
 
 ## Test Method
@@ -137,6 +149,126 @@ New-CimInstance -Namespace root/subscription -ClassName __FilterToConsumerBindin
    - The most useful PowerShell 4104 event was the script block at `00:55:00.896`, which showed `New-CimInstance` being used to create the `__EventFilter`, `CommandLineEventConsumer`, and `__FilterToConsumerBinding`. This validated the script content responsible for creating the WMI event subscription observed in Sysmon Event IDs 19, 20, and 21.
    - Surrounding Events not worth showing
 
+
+## Timeline of Activity
+
+| Time | Data Source | Event / Activity | Analyst Notes |
+|---|---|---|---|
+| 00:54:26 | PowerShell 4104 | `Invoke-AtomicTest T1546.003 -ShowDetailsBrief` executed | Atomic Red Team test details were reviewed. |
+| 00:54:45 | PowerShell 4104 | `Invoke-AtomicTest T1546.003 -TestNumbers 1 -CheckPrereqs` executed | Atomic Red Team prerequisite check was run. |
+| 00:54:59 | PowerShell 4104 | `Invoke-AtomicTest T1546.003 -TestNumbers 1` executed | Atomic Red Team WMI persistence test was started. |
+| 00:55:00 | Sysmon Event ID 1 | `powershell.exe` launched another `powershell.exe` process containing `New-CimInstance` commands | Process creation showed PowerShell creating WMI subscription components. |
+| 00:55:00 | PowerShell 4104 | Script block contained `New-CimInstance`, `__EventFilter`, `CommandLineEventConsumer`, and `__FilterToConsumerBinding` | PowerShell script block logging confirmed the script content used to create the WMI subscription. |
+| 00:55:01 | Sysmon Event ID 19 | WMI Event Filter created | Trigger condition was created. |
+| 00:55:01 | Sysmon Event ID 20 | WMI Event Consumer created | Action was created. In this test, the consumer was configured to run `notepad.exe`. |
+| 00:55:01 | Sysmon Event ID 1 | `WmiPrvSE.exe` started under `svchost.exe` | WMI Provider Host activity was observed shortly after the WMI creation command. |
+| 00:55:07 | Sysmon Event ID 21 | WMI Filter-to-Consumer Binding created | The trigger and action were linked, completing the WMI event subscription chain. |
+
+
+## General Triage Steps
+
+If this detection fired in a real environment, the analyst should validate whether the WMI event subscription is authorised or suspicious.
+
+### 1. Confirm the WMI Persistence Chain
+
+Review Sysmon Event IDs `19`, `20`, and `21` on the same host within a short time window.
+
+- Event ID `19` = WMI event filter created
+- Event ID `20` = WMI event consumer created
+- Event ID `21` = WMI filter-to-consumer binding created
+
+The presence of all three events close together suggests a complete WMI event subscription was created.
+
+### 2. Review the Consumer Action
+
+Check what the WMI consumer is configured to execute.
+
+Focus on fields such as:
+
+- `CommandLineTemplate`
+- `Consumer`
+- `Destination`
+
+Higher-risk examples include consumers executing:
+
+- `powershell.exe`
+- `cmd.exe`
+- `wscript.exe`
+- `cscript.exe`
+- `mshta.exe`
+- `rundll32.exe`
+- Files from user-writable paths such as `C:\Users`, `C:\ProgramData`, `AppData`, or `C:\Temp`
+
+### 3. Identify the Creating Process
+
+Pivot to Sysmon Event ID `1` around the same timestamp to identify what process created the WMI subscription.
+
+Useful fields:
+
+- `ParentImage`
+- `Image`
+- `CommandLine`
+- `User`
+- `ProcessId`
+- `ParentProcessId`
+
+This helps determine whether the activity came from PowerShell, an admin tool, an EDR/management agent, or an unknown process.
+
+### 4. Review PowerShell Script Block Logs
+
+If PowerShell was involved, review PowerShell Event ID `4104` around the same time.
+
+Look for script content containing:
+
+- `New-CimInstance`
+- `Set-WmiInstance`
+- `__EventFilter`
+- `CommandLineEventConsumer`
+- `__FilterToConsumerBinding`
+- `root\subscription`
+
+This can confirm the script content used to create the WMI subscription.
+
+### 5. Validate Legitimacy
+
+Determine whether the WMI subscription is expected.
+
+Check:
+
+- Is the host managed by SCCM, Intune, monitoring agents, or other management tooling?
+- Is the user expected to create WMI subscriptions?
+- Does the consumer execute a known and approved command?
+- Is the subscription name related to known software or suspicious naming?
+- Does the timing align with approved change activity?
+
+### 6. Scope for Related Activity
+
+Search for the same WMI subscription name, command, or user across other hosts.
+
+Also review related activity around the same time:
+
+- PowerShell execution
+- File creation
+- Network connections
+- Registry changes
+- New services
+- Scheduled tasks
+- Suspicious logons
+
+### 7. Contain and Remove if Unauthorised
+
+If the WMI subscription is confirmed as unauthorised or malicious:
+
+- Isolate the host if needed
+- Preserve evidence
+- Remove the WMI binding first
+- Remove the event consumer
+- Remove the event filter
+- Re-scan the host
+- Continue investigation for initial access and additional persistence
+
+   
+
 ## Findings 
 
 PowerShell Event ID 4104 did not provide significantly more context than Sysmon Event ID 1 in this test, because the full WMI creation command was already visible in the Sysmon process command line. Another win for sysmon :D
@@ -145,7 +277,20 @@ However, 4104 was still useful as supporting evidence because it confirmed the s
 
 For this hunt, Sysmon Event IDs `19`, `20`, and `21` were the primary evidence of WMI persistence object creation, Sysmon Event ID `1` showed the process responsible, and PowerShell Event ID `4104` validated the script content.
 
-- This analysis answered the key questions around the WMI persistence mechanism, when it was created, how it was configured, what action it was designed to execute, and when that action would be triggered.
+- This analysis answered the key questions we'd need to understand during investigation
+
+
+| Question | Answer |
+|---|---|
+| When was it created? | The WMI subscription components were created around `00:55:01` on `DESKTOP-DNB5U70`. |
+| What created it? | PowerShell created the WMI objects using `New-CimInstance`. |
+| Which user created it? | The activity was associated with `DESKTOP-DNB5U70\Adam` (Ran by myself under user context). |
+| What was created? | A WMI event filter, command-line event consumer, and filter-to-consumer binding. |
+| What was the trigger? | The event filter used a WQL query based on system uptime: `Win32_PerfFormattedData_PerfOS_System` with `SystemUpTime >= 240` and `< 325`. |
+| What action would run? | The `CommandLineEventConsumer` was configured to execute `C:\WINDOWS\System32\notepad.exe`. |
+| How was the trigger linked to the action? | Sysmon Event ID `21` showed the filter-to-consumer binding linking the event filter to the command-line consumer. |
+| Why is it suspicious? | The filter, consumer, and binding were created close together, forming a complete WMI event subscription persistence chain. |
+| What validated the script content? | PowerShell Event ID `4104` showed `New-CimInstance` being used to create `__EventFilter`, `CommandLineEventConsumer`, and `__FilterToConsumerBinding`. |
 
 
 ## Removal of WMI Persistance
