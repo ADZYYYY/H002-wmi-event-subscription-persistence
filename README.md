@@ -1,0 +1,1 @@
+# H002-wmi-event-subscription-persistence
