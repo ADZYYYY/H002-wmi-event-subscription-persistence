@@ -293,7 +293,7 @@ For this hunt, Sysmon Event IDs `19`, `20`, and `21` were the primary evidence o
 | What validated the script content? | PowerShell Event ID `4104` showed `New-CimInstance` being used to create `__EventFilter`, `CommandLineEventConsumer`, and `__FilterToConsumerBinding`. |
 
 
-## Removal of WMI Persistance
+## Removal of WMI Persistence
 
 - There are many ways to remove the WMI entries, if you have physical access to the machine or remote access you can simply download Autoruns from sysinternals - https://learn.microsoft.com/en-us/sysinternals/downloads/autoruns , select the WMI tab, and remove the malicous entries
  ![Autoruns](screenshots/WMIPersistenceH002.png)
